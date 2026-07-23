@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -18,6 +19,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "teammate: %s\n", err)
 			os.Exit(1)
 		}
+		return
+	}
+	if handleProjectTrustFlag(os.Args[1:]) {
 		return
 	}
 
@@ -62,4 +66,40 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// handleProjectTrustFlag provides a safe bootstrap path for projects that
+// only have project-local configuration. Without this explicit decision there
+// may be no global provider configuration available to start the TUI and run
+// its /trust command.
+func handleProjectTrustFlag(args []string) bool {
+	if len(args) != 1 {
+		return false
+	}
+	var state config.TrustState
+	switch strings.ToLower(args[0]) {
+	case "--trust-project":
+		state = config.TrustTrusted
+	case "--deny-project":
+		state = config.TrustDenied
+	case "--revoke-project-trust":
+		wd, _ := os.Getwd()
+		home, _ := os.UserHomeDir()
+		if err := config.RevokeProjectTrust(home, wd); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: could not revoke project trust: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Project trust revoked.")
+		return true
+	default:
+		return false
+	}
+	wd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	if err := config.SetProjectTrust(home, wd, state); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: could not save project trust decision: %s\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Project trust set to %s. Start MygoCode again to apply it.\n", state)
+	return true
 }

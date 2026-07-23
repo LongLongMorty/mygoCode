@@ -2,6 +2,8 @@
 
 > 目的：把 MygoCode 打磨成适合日常实习展示的项目，而不是复刻 OpenCode。本文基于 2026-07-22 对 [OpenCode](https://github.com/anomalyco/opencode) 的 README、Agents、Permissions、Commands、Share 与 Config 公开文档，以及本仓库源码的对照。
 
+> 实施入口：[OPENCODE_改进实施规格.md](./OPENCODE_改进实施规格.md)。当前状态为“仅完成规格与测试设计，尚未实现本组功能”；P0/P1/P2 必须按规格中的验收标准推进。
+
 ## 结论
 
 OpenCode 的优势不只是 Agent 功能本身，而是把能力组织成容易理解的使用路径：用户能一眼区分 Build / Plan Agent，能看到子任务的进展，也能在命令行中把 Agent 接进脚本。
@@ -114,10 +116,12 @@ mygocode run --agent plan --format json "分析这个仓库的认证流程"
 
 ## 推荐实施顺序
 
-1. 实现 `build / plan / review` 三个主 Agent 档案并补切换测试。
-2. 实现 `/tasks`，用已有进度数据提供汇总视图。
-3. 实现 `mygocode run` 的纯文本路径；JSON 输出放在最后。
-4. 更新 README，放入一次 `/agent plan`、一次 `/tasks`、一次 `mygocode run --agent review` 的真实输出截图或文本。
+具体的 spec、验收标准和测试编号见 [OPENCODE_改进实施规格.md](./OPENCODE_改进实施规格.md)，执行顺序保持 P0 → P1 → P2：
+
+1. **P0（1 天）**：实现 `build / plan / review` 主 Agent 档案，补切换、权限和状态展示测试。
+2. **P1（0.5～1 天）**：实现只读 `/tasks`，用已有 `TaskManager` 和团队进度提供汇总视图。
+3. **P2（1～2 天）**：实现 `mygocode run` 纯文本路径，再补 `--format json`、退出码和超时测试。
+4. **收尾**：运行规格中的回归命令，更新 README 和简历表述；未通过测试的功能只写“规划中”。
 
 ## 简历表述参考
 

@@ -42,6 +42,13 @@ type TaskManager struct {
 	notifications []TaskNotification
 }
 
+// TaskSnapshot is a copy safe to render while background tasks update.
+type TaskSnapshot struct {
+	ID, Name          string
+	Status            TaskStatus
+	CreatedAt, DoneAt time.Time
+}
+
 type TaskNotification struct {
 	TaskID string
 	Name   string
@@ -81,6 +88,16 @@ func (tm *TaskManager) ListTasks() []*Task {
 	var result []*Task
 	for _, t := range tm.tasks {
 		result = append(result, t)
+	}
+	return result
+}
+
+func (tm *TaskManager) Snapshots() []TaskSnapshot {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	result := make([]TaskSnapshot, 0, len(tm.tasks))
+	for _, task := range tm.tasks {
+		result = append(result, TaskSnapshot{ID: task.ID, Name: task.Name, Status: task.Status, CreatedAt: task.CreatedAt, DoneAt: task.DoneAt})
 	}
 	return result
 }

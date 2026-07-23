@@ -32,6 +32,8 @@ type Context struct {
 	SkillList         func() []SkillInfo
 	SkillReload       func() int // reload catalog + prompt, returns new skill count
 	MCPInfo           func() string
+	AgentProfile      string
+	TasksSummary      func() string
 	WorkDir           string
 	Model             string
 }
@@ -192,6 +194,15 @@ func CreateDefaultRegistry() *Registry {
 			return sb.String()
 		},
 	})
+
+	r.Register(&Command{Name: "agent", Description: "List or switch main agent profile", Type: TypeLocalUI})
+	r.Register(&Command{Name: "tasks", Description: "Show read-only task and teammate summary", Type: TypeLocal,
+		Handler: func(ctx *Context) string {
+			if ctx.TasksSummary == nil {
+				return "No active or completed tasks."
+			}
+			return ctx.TasksSummary()
+		}})
 
 	r.Register(&Command{
 		Name:        "mcp",

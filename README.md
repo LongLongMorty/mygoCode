@@ -300,6 +300,20 @@ go test ./...
 
 完整的需求、阶段计划、验收标准和测试矩阵见：[PI_改进实施规格.md](./PI_改进实施规格.md)。项目级配置默认不受信任，仅加载全局配置；通过 `/trust trust` 明确授权后，重启程序才会加载项目的 Hook、命令、技能和 MCP 配置。
 
+如果项目仅有本地配置、尚未配置全局 provider，先执行 `./mygocode --trust-project` 完成显式首次授权，再重新启动程序。
+
+## 📌 OpenCode 借鉴改进计划
+
+当前状态：**进行中**。P0/P1 已完成首版实现并有针对性单元测试；P2 非交互执行经评估后不在当前范围内实施。
+
+| 优先级 | 计划 | 目的 |
+| --- | --- | --- |
+| P0 | `build / plan / review` 主 Agent 档案 | 让工作阶段、提示词和权限边界一眼可见 |
+| P1 | 只读 `/tasks` 汇总 | 查看子 Agent 与团队成员的状态和最近活动 |
+| P2 | `mygocode run` 非交互执行（不实施） | 经评估后不纳入当前项目 |
+
+已实现：`/agent` 的 `build`、`plan`、`review` 档案映射与只读工具限制，以及只读 `/tasks` 汇总。完整需求、验收标准和测试矩阵见：[OPENCODE_改进实施规格.md](./OPENCODE_改进实施规格.md)。
+
 ## 💡 最佳实践
 
 - 全局配置存放在 `~/.mygocode/config.yaml`，项目级配置存放在 `.mygocode/config.local.yaml`

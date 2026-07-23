@@ -179,6 +179,7 @@ type Model struct {
 	historyDraft   string
 
 	sessionID    string
+	profile      agent.Profile
 	fileHistory  *filehistory.History
 	defaultTools tools.DefaultTools
 	prePlanMode  permissions.PermissionMode
@@ -268,6 +269,7 @@ func New(providers []config.ProviderConfig, mcpConfigs []config.MCPServerConfig,
 		registry:           reg,
 		defaultTools:       dt,
 		cmdRegistry:        commands.CreateDefaultRegistry(),
+		profile:            agent.DefaultProfile(),
 		spinner:            sp,
 		askUserCh:          askCh,
 		subAgentProgressCh: subProgressCh,
@@ -1699,6 +1701,22 @@ func (m Model) buildCommandContext(args string) *commands.Context {
 			}
 			return info
 		},
+		AgentProfile: m.profile.Name,
+		TasksSummary: func() string {
+			var summaries []string
+			if m.taskMgr != nil {
+				summaries = append(summaries, agents.FormatTaskSummary(m.taskMgr.Snapshots(), time.Now()))
+			}
+			if m.teamMgr != nil {
+				for _, p := range m.teamMgr.GetAllTeammateProgress() {
+					summaries = append(summaries, fmt.Sprintf("%s | team | %s | %s | tools: %d | -", p.Name, p.GetStatus(), p.ActivitySummary(), p.GetToolUseCount()))
+				}
+			}
+			if len(summaries) == 0 {
+				return "No active or completed tasks."
+			}
+			return strings.Join(summaries, "\n")
+		},
 		SkillList: func() []commands.SkillInfo {
 			if m.skillCatalog == nil {
 				return nil
@@ -1813,6 +1831,36 @@ func (m Model) executeCommand(name, args string) (tea.Model, tea.Cmd) {
 				m.updateViewport()
 				return m.sendMessage(args)
 			}
+			m.updateViewport()
+			return m, nil
+		case "agent":
+			if m.thinking {
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "error", content: "Cannot switch agent profile while a request is running."})
+				m.updateViewport()
+				return m, nil
+			}
+			if args == "" {
+				var lines []string
+				for _, p := range agent.Profiles() {
+					lines = append(lines, fmt.Sprintf("%s — %s", p.Name, p.Description))
+				}
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "system", content: "Agent profiles:\n" + strings.Join(lines, "\n")})
+				m.updateViewport()
+				return m, nil
+			}
+			profile, err := agent.LookupProfile(args)
+			if err != nil {
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "error", content: err.Error()})
+				m.updateViewport()
+				return m, nil
+			}
+			m.profile = profile
+			if m.ag != nil {
+				m.ag.Checker.Mode = profile.PermissionMode
+				m.ag.SetToolFilter(profile.AllowsTool)
+				m.ag.Instructions = profile.Instructions(m.instructionsContent)
+			}
+			m.chatMessages = append(m.chatMessages, chatMessage{role: "system", content: "Switched agent profile to " + profile.Name})
 			m.updateViewport()
 			return m, nil
 		case "compact":
