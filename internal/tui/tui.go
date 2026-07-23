@@ -1689,7 +1689,15 @@ func (m Model) buildCommandContext(args string) *commands.Context {
 			return len(m.registry.ListTools())
 		},
 		SessionInfo: func() string {
-			return fmt.Sprintf("Current session: %d messages", len(m.chatMessages))
+			wd, _ := os.Getwd()
+			info := fmt.Sprintf("Current session: %s\nMessages: %d", m.sessionID, len(session.LoadSession(wd, m.sessionID)))
+			if metadata, ok, _ := session.GetSessionMetadata(wd, m.sessionID); ok {
+				info += fmt.Sprintf("\nParent session: %s", metadata.ParentSessionID)
+			}
+			if stat, err := os.Stat(session.SessionFilePath(wd, m.sessionID)); err == nil {
+				info += fmt.Sprintf("\nFile size: %s", session.FormatFileSize(stat.Size()))
+			}
+			return info
 		},
 		SkillList: func() []commands.SkillInfo {
 			if m.skillCatalog == nil {
@@ -1839,6 +1847,63 @@ func (m Model) executeCommand(name, args string) (tea.Model, tea.Cmd) {
 			}
 		case "resume":
 			return m.handleResume(args)
+		case "fork":
+			wd, _ := os.Getwd()
+			child, err := session.ForkSession(wd, m.sessionID)
+			if err != nil {
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "error", content: "Could not fork session: " + err.Error()})
+			} else {
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "system", content: fmt.Sprintf("Forked session %s from %s. Use /resume %s to switch.", child, m.sessionID, child)})
+			}
+			m.updateViewport()
+			return m, nil
+		case "export":
+			wd, _ := os.Getwd()
+			path, err := session.ExportHTML(wd, m.sessionID, args)
+			if err != nil {
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "error", content: "Could not export session: " + err.Error()})
+			} else {
+				m.chatMessages = append(m.chatMessages, chatMessage{role: "system", content: "Exported redacted HTML: " + path})
+			}
+			m.updateViewport()
+			return m, nil
+		case "trust":
+			wd, _ := os.Getwd()
+			home, _ := os.UserHomeDir()
+			sub, _, _ := strings.Cut(strings.TrimSpace(args), " ")
+			var message string
+			switch strings.ToLower(sub) {
+			case "", "status":
+				state, err := config.ProjectTrustState(home, wd)
+				if err != nil {
+					message = "Project trust is undecided (trust storage error: " + err.Error() + ")"
+				} else {
+					message = "Project trust: " + string(state)
+				}
+			case "trust":
+				err := config.SetProjectTrust(home, wd, config.TrustTrusted)
+				message = "Project configuration trusted. Restart MygoCode to load project resources."
+				if err != nil {
+					message = "Could not record project trust: " + err.Error()
+				}
+			case "deny":
+				err := config.SetProjectTrust(home, wd, config.TrustDenied)
+				message = "Project configuration denied. Only global resources will load."
+				if err != nil {
+					message = "Could not record project decision: " + err.Error()
+				}
+			case "revoke":
+				err := config.RevokeProjectTrust(home, wd)
+				message = "Project trust revoked. The next startup will request a decision."
+				if err != nil {
+					message = "Could not revoke project trust: " + err.Error()
+				}
+			default:
+				message = "Usage: /trust [status|trust|deny|revoke]"
+			}
+			m.chatMessages = append(m.chatMessages, chatMessage{role: "system", content: message})
+			m.updateViewport()
+			return m, nil
 		case "rewind":
 			return m.handleRewind()
 		case "sandbox":
@@ -4303,6 +4368,9 @@ func (m Model) renderResumeView() string {
 		meta = append(meta, session.FormatRelativeTime(s.ModTime))
 		if s.GitBranch != "" {
 			meta = append(meta, s.GitBranch)
+		}
+		if s.ParentSessionID != "" {
+			meta = append(meta, "from "+s.ParentSessionID)
 		}
 		meta = append(meta, session.FormatFileSize(s.FileSize))
 		metaStr := strings.Join(meta, " · ")

@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -143,6 +142,31 @@ type MCPServerConfig struct {
 	Env       map[string]string `yaml:"env"`
 }
 
+// MediaProviderConfig describes an optional image or video generation provider.
+// It is kept separate from chat providers because media requests use a
+// different API contract.
+type MediaProviderConfig struct {
+	Name    string `yaml:"name"`
+	Type    string `yaml:"type"`
+	BaseURL string `yaml:"base_url"`
+	APIKey  string `yaml:"api_key"`
+	Model   string `yaml:"model"`
+}
+
+func (p *MediaProviderConfig) ResolveAPIKey() string {
+	if p.APIKey != "" {
+		return p.APIKey
+	}
+	return os.Getenv("AGNES_API_KEY")
+}
+
+func (p *MediaProviderConfig) ResolveBaseURL() string {
+	if p.BaseURL != "" {
+		return strings.TrimRight(p.BaseURL, "/")
+	}
+	return "https://apihub.agnes-ai.com"
+}
+
 // SandboxConfig 控制 OS 级沙箱的配置
 type SandboxConfig struct {
 	Enabled        bool `yaml:"enabled"`         // 是否启用沙箱
@@ -151,12 +175,13 @@ type SandboxConfig struct {
 }
 
 type AppConfig struct {
-	Providers             []ProviderConfig  `yaml:"providers"`
-	PermissionMode        string            `yaml:"permission_mode"`
-	MCPServers            []MCPServerConfig `yaml:"mcp_servers"`
-	Hooks                 []hooks.Hook      `yaml:"hooks"`
-	Sandbox               SandboxConfig     `yaml:"sandbox"`
-	EnableCoordinatorMode bool              `yaml:"enable_coordinator_mode"`
+	Providers             []ProviderConfig      `yaml:"providers"`
+	PermissionMode        string                `yaml:"permission_mode"`
+	MCPServers            []MCPServerConfig     `yaml:"mcp_servers"`
+	Hooks                 []hooks.Hook          `yaml:"hooks"`
+	Sandbox               SandboxConfig         `yaml:"sandbox"`
+	EnableCoordinatorMode bool                  `yaml:"enable_coordinator_mode"`
+	MediaProviders        []MediaProviderConfig `yaml:"media_providers"`
 }
 
 func loadSingleFile(path string) (*AppConfig, error) {
@@ -193,6 +218,20 @@ func mergeConfig(base, override *AppConfig) *AppConfig {
 		}
 	}
 	base.Hooks = append(base.Hooks, override.Hooks...)
+	if len(override.MediaProviders) > 0 {
+		byName := make(map[string]int)
+		for i, p := range base.MediaProviders {
+			byName[p.Name] = i
+		}
+		for _, p := range override.MediaProviders {
+			if idx, ok := byName[p.Name]; ok {
+				base.MediaProviders[idx] = p
+			} else {
+				base.MediaProviders = append(base.MediaProviders, p)
+				byName[p.Name] = len(base.MediaProviders) - 1
+			}
+		}
+	}
 	// 沙箱配置：后加载的配置覆盖先前的
 	if override.Sandbox.Enabled {
 		base.Sandbox = override.Sandbox
@@ -232,6 +271,26 @@ func validateProviders(cfg *AppConfig) error {
 			}
 		}
 	}
+	if err := validateMediaProviders(cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateMediaProviders(cfg *AppConfig) error {
+	seen := make(map[string]bool)
+	for i, p := range cfg.MediaProviders {
+		if p.Name == "" {
+			return &ConfigError{Message: fmt.Sprintf("Media provider #%d: missing name", i+1)}
+		}
+		if p.Type != "agnes-image" && p.Type != "agnes-video" {
+			return &ConfigError{Message: fmt.Sprintf("Media provider %q: unsupported type %q", p.Name, p.Type)}
+		}
+		if seen[p.Name] {
+			return &ConfigError{Message: fmt.Sprintf("Duplicate media provider name %q", p.Name)}
+		}
+		seen[p.Name] = true
+	}
 	return nil
 }
 
@@ -253,34 +312,6 @@ func LoadConfig(path string) (*AppConfig, error) {
 	}
 
 	home, _ := os.UserHomeDir()
-	candidates := []string{
-		filepath.Join(home, ".mygocode", "config.yaml"),
-		filepath.Join(wd, ".mygocode", "config.yaml"),
-		filepath.Join(wd, ".mygocode", "config.local.yaml"),
-	}
-
-	var merged *AppConfig
-	for _, path := range candidates {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			continue
-		}
-		layer, err := loadSingleFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if merged == nil {
-			merged = layer
-		} else {
-			merged = mergeConfig(merged, layer)
-		}
-	}
-
-	if merged == nil {
-		return nil, &ConfigError{Message: "No config file found. Expected .mygocode/config.yaml in project or ~/.mygocode/config.yaml"}
-	}
-
-	if err := validateProviders(merged); err != nil {
-		return nil, err
-	}
-	return merged, nil
+	cfg, _, err := LoadConfigForProject(home, wd)
+	return cfg, err
 }

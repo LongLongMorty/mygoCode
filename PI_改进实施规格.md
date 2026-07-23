@@ -1,8 +1,11 @@
 # Pi 借鉴改进实施规格（轻量版）
 
-> 状态：Draft（仅完成规格与测试设计，尚未实现功能）  
+> 状态：Implemented（P0-P2 已实现并通过目标模块测试）
 > 来源：[PI_借鉴与改进建议.md](./PI_借鉴与改进建议.md)  
 > 目标：用最少的代码补齐安全边界、方案试错和结果复盘能力，适合日常实习项目展示。
+
+实际实现文件：`internal/config/trust.go`、`internal/session/session.go`、`internal/session/export.go`、`internal/tui/tui.go`。
+实际验证命令：`go test ./internal/config ./internal/session ./internal/commands ./internal/tui`。
 
 ## 1. 规格流程
 

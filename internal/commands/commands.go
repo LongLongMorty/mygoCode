@@ -343,6 +343,24 @@ func CreateDefaultRegistry() *Registry {
 	})
 
 	r.Register(&Command{
+		Name:        "fork",
+		Description: "Fork the current session into an independent branch",
+		Type:        TypeLocalUI,
+	})
+
+	r.Register(&Command{
+		Name:        "export",
+		Description: "Export the current session as redacted HTML",
+		Type:        TypeLocalUI,
+	})
+
+	r.Register(&Command{
+		Name:        "trust",
+		Description: "Show, grant, deny, or revoke project configuration trust",
+		Type:        TypeLocalUI,
+	})
+
+	r.Register(&Command{
 		Name:        "skills",
 		Description: "List available skills (use '/skills reload' to hot-reload)",
 		Type:        TypeLocal,

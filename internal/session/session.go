@@ -99,13 +99,25 @@ func FindLastCompactBoundary(msgs []Message) (boundary CompactBoundary, after []
 }
 
 type SessionInfo struct {
-	ID           string
-	FirstMessage string
-	MessageCount int
-	FileSize     int64
-	GitBranch    string
-	ModTime      time.Time
+	ID              string
+	ParentSessionID string
+	FirstMessage    string
+	MessageCount    int
+	FileSize        int64
+	GitBranch       string
+	ModTime         time.Time
 }
+
+// SessionMetadata is stored as the first line of a forked JSONL file. It is a
+// record, not a model message, and LoadSession intentionally excludes it.
+type SessionMetadata struct {
+	Type            string `json:"type"`
+	ParentSessionID string `json:"parent_session_id"`
+	ForkedAt        int64  `json:"forked_at"`
+	Version         int    `json:"version"`
+}
+
+const metadataRecordType = "session_metadata"
 
 func NewID() string {
 	var b [2]byte
@@ -151,12 +163,91 @@ func LoadSession(workDir, sessionID string) []Message {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 	for scanner.Scan() {
+		var metadata SessionMetadata
+		if json.Unmarshal(scanner.Bytes(), &metadata) == nil && metadata.Type == metadataRecordType {
+			continue
+		}
 		var msg Message
 		if json.Unmarshal(scanner.Bytes(), &msg) == nil && msg.Content != "" {
 			msgs = append(msgs, msg)
 		}
 	}
 	return msgs
+}
+
+// GetSessionMetadata returns fork metadata when present. Legacy session files
+// return (zero, false, nil) and remain fully supported.
+func GetSessionMetadata(workDir, sessionID string) (SessionMetadata, bool, error) {
+	f, err := os.Open(SessionFilePath(workDir, sessionID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return SessionMetadata{}, false, nil
+		}
+		return SessionMetadata{}, false, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	if !scanner.Scan() {
+		return SessionMetadata{}, false, scanner.Err()
+	}
+	var metadata SessionMetadata
+	if err := json.Unmarshal(scanner.Bytes(), &metadata); err != nil || metadata.Type != metadataRecordType {
+		return SessionMetadata{}, false, nil
+	}
+	return metadata, true, nil
+}
+
+// ForkSession clones the complete source JSONL after a metadata record. The
+// target becomes visible only after an atomic rename, so failed copies leave no
+// unusable partial session behind.
+func ForkSession(workDir, sourceID string) (string, error) {
+	if strings.TrimSpace(sourceID) == "" {
+		return "", fmt.Errorf("source session ID is required")
+	}
+	sourcePath := SessionFilePath(workDir, sourceID)
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("open source session: %w", err)
+	}
+	defer source.Close()
+	if _, err := source.Stat(); err != nil {
+		return "", fmt.Errorf("stat source session: %w", err)
+	}
+
+	newID := NewID()
+	dir := sessionsDir(workDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(dir, "."+newID+"-*.tmp")
+	if err != nil {
+		return "", err
+	}
+	tmpName := tmp.Name()
+	cleanup := func(err error) (string, error) {
+		tmp.Close()
+		os.Remove(tmpName)
+		return "", err
+	}
+	metadata, err := json.Marshal(SessionMetadata{Type: metadataRecordType, ParentSessionID: sourceID, ForkedAt: time.Now().Unix(), Version: 1})
+	if err != nil {
+		return cleanup(err)
+	}
+	if _, err := tmp.Write(append(metadata, '\n')); err != nil {
+		return cleanup(err)
+	}
+	if _, err := tmp.ReadFrom(source); err != nil {
+		return cleanup(fmt.Errorf("copy source session: %w", err))
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return "", err
+	}
+	if err := os.Rename(tmpName, SessionFilePath(workDir, newID)); err != nil {
+		os.Remove(tmpName)
+		return "", err
+	}
+	return newID, nil
 }
 
 // maxSessionAgeDays 是会话的最大保留天数，超过此天数的会话会被自动清理。
@@ -190,6 +281,7 @@ func ListSessions(workDir string) []SessionInfo {
 		}
 
 		msgs := LoadSession(workDir, id)
+		metadata, _, _ := GetSessionMetadata(workDir, id)
 		first := ""
 		for _, msg := range msgs {
 			if msg.Role == "user" {
@@ -199,12 +291,13 @@ func ListSessions(workDir string) []SessionInfo {
 		}
 
 		sessions = append(sessions, SessionInfo{
-			ID:           id,
-			FirstMessage: first,
-			MessageCount: len(msgs),
-			FileSize:     info.Size(),
-			GitBranch:    branch,
-			ModTime:      info.ModTime(),
+			ID:              id,
+			ParentSessionID: metadata.ParentSessionID,
+			FirstMessage:    first,
+			MessageCount:    len(msgs),
+			FileSize:        info.Size(),
+			GitBranch:       branch,
+			ModTime:         info.ModTime(),
 		})
 	}
 
