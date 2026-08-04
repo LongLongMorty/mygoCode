@@ -82,6 +82,7 @@ type Server struct {
 	registry     *tools.Registry
 	defaultTools tools.DefaultTools
 	client       llm.Client
+	auxClient    llm.Client // optional cheaper client from aux_model; nil falls back to client
 	sessionID    string
 	fileHistory  *filehistory.History
 
@@ -246,6 +247,12 @@ func (s *Server) initAgent() error {
 		return err
 	}
 	s.client = client
+	// Best-effort aux client: nil on failure, every call site falls back to client.
+	if auxCfg := llm.AuxClientConfig(p); auxCfg != nil {
+		if aux, err := llm.NewClient(auxCfg, systemPrompt); err == nil {
+			s.auxClient = aux
+		}
+	}
 	s.conv = conversation.NewManager()
 	s.sessionID = session.NewID()
 	s.fileHistory = filehistory.New(wd, s.sessionID)
@@ -256,6 +263,7 @@ func (s *Server) initAgent() error {
 	s.registerTools(client, p, wd)
 
 	ag := agent.New(client, s.registry, p.Protocol)
+	ag.AuxClient = s.auxClient
 	ag.ContextWindow = p.GetContextWindow()
 	ag.MaxOutputTokens = p.GetMaxOutputTokens()
 	ag.Instructions = s.instructionsContent
@@ -293,7 +301,7 @@ func (s *Server) initAgent() error {
 	}
 
 	s.wireSkillsToAgent(wd)
-	s.memoryExtractor = installMemExtractor(ag, wd, p.Protocol, client, s.registry, s.conv)
+	s.memoryExtractor = installMemExtractor(ag, wd, p.Protocol, client, s.auxClient, s.registry, s.conv)
 
 	gitRoot := worktree.FindCanonicalGitRoot(wd)
 	s.registry.Register(&tools.EnterWorktreeTool{SessionID: s.sessionID, RepoRoot: gitRoot})
@@ -604,7 +612,11 @@ func (s *Server) handleCompact() {
 		recovery = s.ag.RecoveryState
 		schemas = s.ag.Registry.GetAllSchemas(s.ag.Protocol)
 	}
-	msg, err := compact.ForceCompact(context.Background(), s.conv, s.client, wd, s.sessionID, window, recovery, schemas, nil)
+	compactClient := s.client
+	if s.auxClient != nil {
+		compactClient = s.auxClient // compaction summaries run on the aux model when configured
+	}
+	msg, err := compact.ForceCompact(context.Background(), s.conv, compactClient, wd, s.sessionID, window, recovery, schemas, nil)
 	if err != nil {
 		s.send(wsMessage{Type: "error", Data: map[string]string{"message": err.Error()}})
 	} else {
@@ -982,12 +994,13 @@ func buildSkillSection(catalog *skills.Catalog, wd string) string {
 	return sb.String()
 }
 
-func installMemExtractor(ag *agent.Agent, wd, protocol string, client llm.Client, registry *tools.Registry, conv *conversation.Manager) *extractor.Extractor {
+func installMemExtractor(ag *agent.Agent, wd, protocol string, client, auxClient llm.Client, registry *tools.Registry, conv *conversation.Manager) *extractor.Extractor {
 	extr := extractor.InitExtractMemories(extractor.Deps{
 		MemoryDir:     memory.GetAutoMemPath(wd),
 		UserMemoryDir: memory.GetUserAutoMemPath(),
 		ProjectRoot:   wd,
 		Client:        client,
+		AuxClient:     auxClient,
 		ToolRegistry:  registry,
 		Protocol:      protocol,
 		Conversation:  conv,

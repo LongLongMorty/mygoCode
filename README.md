@@ -108,7 +108,10 @@ providers:
     thinking: true
     context_window: 200000
     max_output_tokens: 64000
+    aux_model: haiku   # 可选：后台任务（上下文压缩摘要、记忆提取、记忆召回）使用更便宜的辅助模型
 ```
+
+`aux_model` 支持别名 `haiku`/`sonnet`/`opus`（映射到对应 Claude 模型），也可填任意模型名。留空或删除该字段时，后台任务与主对话使用同一模型。
 
 ### API 密钥
 

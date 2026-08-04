@@ -112,8 +112,13 @@ type Model struct {
 	providers        []config.ProviderConfig
 	selectedProvider *config.ProviderConfig
 	client           llm.Client
-	registry         *tools.Registry
-	ag               *agent.Agent
+	// auxClient is the cheaper/faster client built from the provider's
+	// aux_model config, used for compaction summaries, memory extraction and
+	// memory recall. nil when no aux_model is configured or its client
+	// failed to build — callers fall back to client.
+	auxClient llm.Client
+	registry  *tools.Registry
+	ag        *agent.Agent
 
 	state     appState
 	streaming bool
@@ -408,6 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.client = client
+		m.initAuxClient(p, systemPrompt)
 		m.sessionID = session.NewID()
 		m.fileHistory = filehistory.New(wd, m.sessionID)
 		m.defaultTools.EditFile.FileHistory = m.fileHistory
@@ -418,6 +424,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Silently degrades to the mapping table / default on any failure.
 		llm.ResolveContextWindow(context.Background(), p)
 		ag := agent.New(client, m.registry, p.Protocol)
+		ag.AuxClient = m.auxClient
 		ag.ContextWindow = p.GetContextWindow()
 		ag.MaxOutputTokens = p.GetMaxOutputTokens()
 		ag.Instructions = m.instructionsContent
@@ -1026,6 +1033,25 @@ func (m *Model) loadCustomInstructions(wd string) string {
 	return memory.LoadInstructions(wd)
 }
 
+// initAuxClient builds the auxiliary client from the provider's aux_model
+// config (best-effort). On any failure m.auxClient stays nil so every call
+// site falls back to the main client — a misconfigured aux model must never
+// block startup.
+func (m *Model) initAuxClient(p *config.ProviderConfig, systemPrompt string) {
+	m.auxClient = nil
+	if auxCfg := llm.AuxClientConfig(p); auxCfg != nil {
+		if aux, err := llm.NewClient(auxCfg, systemPrompt); err == nil {
+			m.auxClient = aux
+		} else {
+			m.chatMessages = append(m.chatMessages, chatMessage{
+				role:    "system",
+				content: "Warning: aux_model client failed to build (" + err.Error() + "); falling back to the main model for background tasks.",
+			})
+			m.updateViewport()
+		}
+	}
+}
+
 // installMemoryExtractor wires ch09 background memory extraction onto the
 // given agent. Constructs an Extractor with the current TUI context and
 // hooks it onto ag.OnLoopComplete. Returns the Extractor so the caller
@@ -1040,6 +1066,7 @@ func (m *Model) installMemoryExtractor(ag *agent.Agent, wd, protocol string) *ex
 		UserMemoryDir: memory.GetUserAutoMemPath(),
 		ProjectRoot:   wd,
 		Client:        m.client,
+		AuxClient:     m.auxClient,
 		ToolRegistry:  m.registry,
 		Protocol:      protocol,
 		Conversation:  conv,
@@ -1071,7 +1098,13 @@ func (m *Model) prefetchRelevantMemories(query string) <-chan string {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		selector := func(ctx context.Context, sys, user string) (string, error) {
-			sideClient, err := llm.NewClient(provider, sys)
+			// Side-query client: prefer the aux model when configured (a
+			// recall selector is a cheap task), else the main provider.
+			build := provider
+			if auxCfg := llm.AuxClientConfig(provider); auxCfg != nil {
+				build = auxCfg
+			}
+			sideClient, err := llm.NewClient(build, sys)
 			if err != nil {
 				return "", err
 			}
@@ -1217,6 +1250,7 @@ func (m Model) handleProviderSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.client = client
+		m.initAuxClient(p, systemPrompt)
 		m.sessionID = session.NewID()
 		m.fileHistory = filehistory.New(wd, m.sessionID)
 		m.defaultTools.EditFile.FileHistory = m.fileHistory
@@ -1227,6 +1261,7 @@ func (m Model) handleProviderSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Silently degrades to the mapping table / default on any failure.
 		llm.ResolveContextWindow(context.Background(), p)
 		ag := agent.New(client, m.registry, p.Protocol)
+		ag.AuxClient = m.auxClient
 		ag.ContextWindow = p.GetContextWindow()
 		ag.MaxOutputTokens = p.GetMaxOutputTokens()
 		ag.Instructions = m.instructionsContent
@@ -1876,6 +1911,9 @@ func (m Model) executeCommand(name, args string) (tea.Model, tea.Cmd) {
 			})
 			m.updateViewport()
 			client := m.client
+			if m.auxClient != nil {
+				client = m.auxClient // compaction summaries run on the aux model when configured
+			}
 			conv := m.conversation
 			window := 200000
 			if m.selectedProvider != nil {

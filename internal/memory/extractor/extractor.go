@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -38,11 +39,25 @@ type Deps struct {
 	UserMemoryDir string                           // ~/.mygocode/memory/ — user/feedback (trailing sep); may be "" if $HOME unresolved
 	ProjectRoot   string                           // absolute project root
 	Client        llm.Client                       // forked extraction agent's LLM client
+	AuxClient     llm.Client                       // optional cheaper client; when non-nil the forked extraction agent uses it
 	ToolRegistry  *tools.Registry                  // parent tool registry (will be filtered)
 	Protocol      string                           // "anthropic" / "openai"
 	Conversation  *conversation.Manager            // parent conversation reference
 	AppendSystem  func(string)                     // optional: notify TUI of saved memories
 	DebugLogf     func(format string, args ...any) // optional: debug logging
+}
+
+// client returns the auxiliary client when one is wired, otherwise the main
+// client. The typed-nil guard catches a nil *SomeClient wrapped in the
+// llm.Client interface, which would panic on method call.
+func (d Deps) client() llm.Client {
+	if d.AuxClient != nil {
+		v := reflect.ValueOf(d.AuxClient)
+		if v.Kind() != reflect.Ptr || !v.IsNil() {
+			return d.AuxClient
+		}
+	}
+	return d.Client
 }
 
 // Extractor is the ch09 background memory extractor. State is encapsulated in struct fields; mu
@@ -196,7 +211,7 @@ func (e *Extractor) runExtraction(ctx context.Context, isTrailingRun bool) error
 	subSandbox := permissions.NewPathSandbox(sandboxRoots[0], sandboxRoots[1:]...)
 	subChecker := permissions.NewChecker(subSandbox, &permissions.RuleEngine{}, permissions.ModeBypass)
 
-	subAgent := agent.New(e.deps.Client, subRegistry, e.deps.Protocol)
+	subAgent := agent.New(e.deps.client(), subRegistry, e.deps.Protocol)
 	subAgent.MaxIterations = 5
 	subAgent.Checker = subChecker
 	subAgent.WorkDir = e.deps.ProjectRoot

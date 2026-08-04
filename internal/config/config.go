@@ -37,6 +37,12 @@ type ProviderConfig struct {
 	Thinking        bool   `yaml:"thinking"`
 	ContextWindow   int    `yaml:"context_window"`
 	MaxOutputTokens int    `yaml:"max_output_tokens"`
+	// AuxModel is the model used for cheap background LLM tasks — context
+	// compaction summaries, memory extraction, memory recall selection.
+	// Empty means "no auxiliary model": those tasks use the main Model.
+	// Short aliases (haiku / sonnet / opus) are resolved via llm's alias
+	// table at client-build time.
+	AuxModel string `yaml:"aux_model"`
 
 	// fetchedContextWindow caches the max_input_tokens auto-pulled from the
 	// provider's /v1/models endpoint (layer 2 of GetContextWindow). Populated

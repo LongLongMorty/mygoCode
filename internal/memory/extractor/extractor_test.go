@@ -322,6 +322,129 @@ func TestExtractorDrainIdleReturnsImmediately(t *testing.T) {
 	}
 }
 
+// TestExtractorUsesAuxClient verifies that when Deps.AuxClient is wired, the
+// forked extraction agent streams through the auxiliary client while the main
+// client is left untouched.
+func TestExtractorUsesAuxClient(t *testing.T) {
+	tmp := t.TempDir()
+	memDir := memory.GetAutoMemPath(tmp)
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := conversation.NewManager()
+	parent.AddUserMessage("Remember I'm a Go engineer")
+	parent.AddAssistantMessage("Sure, I'll remember.")
+
+	writePath := filepath.Join(memDir, "user_role.md")
+
+	mainCalled := false
+	mainClient := &mockClient{handlers: []func([]conversation.Message) []llm.StreamEvent{
+		func(_ []conversation.Message) []llm.StreamEvent {
+			mainCalled = true
+			return []llm.StreamEvent{llm.StreamEnd{StopReason: "end_turn"}}
+		},
+	}}
+
+	auxClient := &mockClient{handlers: []func([]conversation.Message) []llm.StreamEvent{
+		func(_ []conversation.Message) []llm.StreamEvent {
+			return []llm.StreamEvent{
+				llm.TextDelta{Text: "Saving."},
+				llm.ToolCallStart{ToolName: "WriteFile", ToolID: "w1"},
+				llm.ToolCallComplete{
+					ToolID:   "w1",
+					ToolName: "WriteFile",
+					Arguments: map[string]any{
+						"file_path": writePath,
+						"content":   "---\nname: user-role\ntype: user\n---\n\nGo engineer.\n",
+					},
+				},
+				llm.StreamEnd{StopReason: "tool_use"},
+			}
+		},
+		func(_ []conversation.Message) []llm.StreamEvent {
+			return []llm.StreamEvent{llm.StreamEnd{StopReason: "end_turn"}}
+		},
+	}}
+
+	reg := tools.NewRegistry()
+	reg.Register(&mockTool{
+		name: "WriteFile", cat: tools.CategoryWrite,
+		exec: func(args map[string]any) tools.ToolResult {
+			fp, _ := args["file_path"].(string)
+			content, _ := args["content"].(string)
+			if err := os.WriteFile(fp, []byte(content), 0o644); err != nil {
+				return tools.ToolResult{Output: err.Error(), IsError: true}
+			}
+			return tools.ToolResult{Output: "wrote " + fp}
+		},
+	})
+
+	deps := Deps{
+		MemoryDir:    memDir,
+		ProjectRoot:  tmp,
+		Client:       mainClient,
+		AuxClient:    auxClient,
+		ToolRegistry: reg,
+		Protocol:     "anthropic",
+		Conversation: parent,
+	}
+	e := InitExtractMemories(deps)
+	if err := e.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if _, err := os.Stat(writePath); err != nil {
+		t.Fatalf("expected user_role.md to exist (aux client should have written it): %v", err)
+	}
+	if mainCalled {
+		t.Error("main client must not be used when AuxClient is wired")
+	}
+	if auxClient.callIdx == 0 {
+		t.Error("aux client was never called")
+	}
+}
+
+// TestExtractorAuxTypedNilFallsBack verifies that a typed-nil AuxClient (a nil
+// *mockClient wrapped in the llm.Client interface) falls back to the main
+// client instead of panicking.
+func TestExtractorAuxTypedNilFallsBack(t *testing.T) {
+	tmp := t.TempDir()
+	memDir := memory.GetAutoMemPath(tmp)
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := conversation.NewManager()
+	parent.AddUserMessage("remember X")
+	parent.AddAssistantMessage("ok")
+
+	mainCalled := false
+	mainClient := &mockClient{handlers: []func([]conversation.Message) []llm.StreamEvent{
+		func(_ []conversation.Message) []llm.StreamEvent {
+			mainCalled = true
+			return []llm.StreamEvent{llm.StreamEnd{StopReason: "end_turn"}}
+		},
+	}}
+
+	deps := Deps{
+		MemoryDir:    memDir,
+		ProjectRoot:  tmp,
+		Client:       mainClient,
+		AuxClient:    (*mockClient)(nil),
+		ToolRegistry: tools.NewRegistry(),
+		Protocol:     "anthropic",
+		Conversation: parent,
+	}
+	e := InitExtractMemories(deps)
+	if err := e.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !mainCalled {
+		t.Error("main client should be used when AuxClient is a typed nil")
+	}
+}
+
 func TestExtractorBuildExtractorConversationAppendsPrompt(t *testing.T) {
 	parent := conversation.NewManager()
 	parent.AddUserMessage("hi")

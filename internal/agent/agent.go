@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +28,12 @@ const (
 )
 
 type Agent struct {
-	Client        llm.Client
+	Client llm.Client
+	// AuxClient is the optional cheaper/faster client used for background
+	// LLM tasks (context compaction summaries). When nil, those tasks fall
+	// back to Client. Wired by the host (TUI/remote) from the provider's
+	// aux_model config.
+	AuxClient     llm.Client
 	Registry      *tools.Registry
 	Protocol      string
 	WorkDir       string
@@ -78,6 +84,31 @@ type Agent struct {
 	// Used by /skills to show what's active and by RecoveryState to survive compaction.
 	// The body is injected once into the conversation as a message — NOT re-injected every turn.
 	activeSkills map[string]string
+}
+
+// compactClient returns the client used for compaction summaries: the
+// auxiliary client when one is wired, otherwise the main client. Keeps the
+// fallback implicit so callers never pass a nil client.
+//
+// The typed-nil guard matters: assigning a nil *SomeClient to the llm.Client
+// interface yields a non-nil interface that panics on method call, so a
+// plain `!= nil` check is not enough.
+func (a *Agent) compactClient() llm.Client {
+	if a.AuxClient != nil && !isNilClient(a.AuxClient) {
+		return a.AuxClient
+	}
+	return a.Client
+}
+
+// isNilClient reports whether c is a typed-nil pointer/interface value
+// wrapped in the llm.Client interface.
+func isNilClient(c llm.Client) bool {
+	v := reflect.ValueOf(c)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
 }
 
 // ActivateSkill records a skill activation. The body is kept for /skills listing and compaction
@@ -230,7 +261,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 			// Layer 2: auto-compact
 			// conv 已经过 Layer 1 裁剪，直接用其消息估算 token
-			if msg, err := compact.ManageContext(ctx, conv, a.Client, a.WorkDir, a.SessionID, a.ContextWindow, a.MaxOutputTokens, &a.compactTracking, a.RecoveryState, toolSchemas, usageAnchor, nil); err == nil && msg != "" {
+			if msg, err := compact.ManageContext(ctx, conv, a.compactClient(), a.WorkDir, a.SessionID, a.ContextWindow, a.MaxOutputTokens, &a.compactTracking, a.RecoveryState, toolSchemas, usageAnchor, nil); err == nil && msg != "" {
 				ch <- CompactEvent{Message: msg}
 				usageAnchor = compact.UsageAnchor{}
 				conv.InjectLongTermMemory(a.Instructions, a.MemoryContent)
@@ -487,7 +518,7 @@ func (a *Agent) handleStreamError(ctx context.Context, ch chan AgentEvent, conv 
 	var ctxErr *llm.ContextTooLongError
 	if errors.As(err, &ctxErr) {
 		// conv 已由 Layer 1 就地裁剪，直接传 nil 让 ForceCompact 使用 conv 自身消息
-		msg, compactErr := compact.ForceCompact(ctx, conv, a.Client, a.WorkDir, a.SessionID, a.ContextWindow, a.RecoveryState, a.currentToolSchemas(), nil)
+		msg, compactErr := compact.ForceCompact(ctx, conv, a.compactClient(), a.WorkDir, a.SessionID, a.ContextWindow, a.RecoveryState, a.currentToolSchemas(), nil)
 		if compactErr == nil && msg != "" {
 			ch <- CompactEvent{Message: "Auto-compacted due to context length: " + msg}
 			return true, true // retry, and the anchor is now stale
