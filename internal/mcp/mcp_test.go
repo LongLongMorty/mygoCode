@@ -3,11 +3,19 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
 
+// TestContext7MCP is a live integration test: it starts the real context7 MCP
+// server via npx and talks to it over stdio. It requires network access and
+// an npm registry, so it is gated behind MYGOCODE_LIVE_TESTS=1 and skipped by
+// default — the default `go test ./...` must not depend on external services.
 func TestContext7MCP(t *testing.T) {
+	if os.Getenv("MYGOCODE_LIVE_TESTS") != "1" {
+		t.Skip("live MCP test: set MYGOCODE_LIVE_TESTS=1 to run (requires network + npx)")
+	}
 	cfg := ServerConfig{
 		Name:    "context7",
 		Command: "npx",

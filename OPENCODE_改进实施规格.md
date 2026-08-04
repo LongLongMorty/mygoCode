@@ -84,7 +84,7 @@ go test ./cmd/mygocode
 go test ./...
 ```
 
-基线记录（2026-07-23）：`internal/agents`、`internal/teams`、`internal/commands` 测试通过；`internal/memory` 当前有既有 Windows 路径断言和项目内存目录残留文件问题。既有编译错误、超时或平台运行时错误须单独登记，不能归因于本组功能。
+基线记录（2026-07-23，2026-08-05 更新）：`internal/agents`、`internal/teams`、`internal/commands` 测试通过；`internal/memory` 的既有 Windows 路径断言问题与项目内存目录残留文件问题已修复（测试改为平台无关断言并双平台隔离 home 目录，见 `memory_test.go`）。既有编译错误、超时或平台运行时错误须单独登记，不能归因于本组功能。
 
 ## 7. 文档规则
 

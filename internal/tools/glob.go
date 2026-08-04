@@ -83,7 +83,10 @@ func (t *GlobTool) Execute(_ context.Context, args map[string]any) ToolResult {
 			}
 		}
 		if matched {
-			matches = append(matches, rel)
+			// 统一输出为 Unix 风格路径（/）：LLM 训练语料以 / 为主，
+			// 跨平台输出一致；后续工具（ReadFile/EditFile 等）对两种
+			// 分隔符都能解析，不受影响。
+			matches = append(matches, filepath.ToSlash(rel))
 		}
 		return nil
 	})

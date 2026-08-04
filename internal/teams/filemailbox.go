@@ -5,11 +5,21 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 type FileMailBox struct {
 	baseDir string
+	// mu serialises critical sections within this process. The on-disk lock
+	// file is only a cross-process guard; it has a classic close-then-remove
+	// race (a second writer can create the "same" lock between Close and
+	// Remove, then the first writer's Remove deletes the second writer's
+	// lock, letting a third writer in). Serialising in-process removes that
+	// race entirely for the multi-agent-in-one-process model, while the file
+	// lock still protects against multiple mygocode processes sharing a
+	// teams dir.
+	mu sync.Mutex
 }
 
 type FileMailMessage struct {
@@ -69,6 +79,9 @@ func (mb *FileMailBox) MarkAllRead(agentID string) error {
 
 // withLock acquires a file lock, reads the inbox, applies the mutation, and writes back.
 func (mb *FileMailBox) withLock(agentID string, fn func([]FileMailMessage) ([]FileMailMessage, error)) error {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+
 	lockFile := mb.lockPath(agentID)
 
 	// Acquire lock with retries

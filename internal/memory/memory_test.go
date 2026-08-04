@@ -7,12 +7,23 @@ import (
 	"testing"
 )
 
+// isolateUserHome redirects both the Unix and Windows home-dir lookups to a
+// fresh temp dir. On Windows os.UserHomeDir reads USERPROFILE, not HOME, so
+// setting only HOME leaves tests reading the real user memory directory —
+// which turns environment-dependent (leftover files → flaky failures).
+func isolateUserHome(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+}
+
 func TestGetAutoMemPath(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "")
-	root := "/tmp/foo/project"
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	root := filepath.Join(t.TempDir(), "project")
+	want := filepath.Join(root, ".mygocode", "memory") + string(filepath.Separator)
 	path := GetAutoMemPath(root)
-	if !strings.HasSuffix(path, "/.mygocode/memory/") {
-		t.Errorf("expected suffix /.mygocode/memory/, got: %s", path)
+	if path != want {
+		t.Errorf("GetAutoMemPath(%q) = %q, want %q", root, path, want)
 	}
 	if !strings.HasPrefix(path, root) {
 		t.Errorf("expected path under project root %s, got: %s", root, path)
@@ -20,23 +31,44 @@ func TestGetAutoMemPath(t *testing.T) {
 }
 
 func TestGetAutoMemPathRespectsOverride(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "/custom/memdir")
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "/custom/memdir")
+	override := "/custom/memdir"
+	want := filepath.Clean(override) + string(filepath.Separator)
 	path := GetAutoMemPath("/tmp/anything")
-	if path != "/custom/memdir/" {
-		t.Errorf("override not honored: %s", path)
+	if path != want {
+		t.Errorf("override not honored: got %q, want %q", path, want)
+	}
+}
+
+// TestGetAutoMemPathLegacyEnvVar verifies the pre-rename env var name still
+// works as a fallback, and the new name wins when both are set.
+func TestGetAutoMemPathLegacyEnvVar(t *testing.T) {
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "/legacy/memdir")
+	want := filepath.Clean("/legacy/memdir") + string(filepath.Separator)
+	if got := GetAutoMemPath("/tmp/x"); got != want {
+		t.Errorf("legacy env var not honoured: got %q, want %q", got, want)
+	}
+
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "/new/memdir")
+	want = filepath.Clean("/new/memdir") + string(filepath.Separator)
+	if got := GetAutoMemPath("/tmp/x"); got != want {
+		t.Errorf("new env var should win: got %q, want %q", got, want)
 	}
 }
 
 func TestIsAutoMemPath(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "")
-	root := "/tmp/p"
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	isolateUserHome(t)
+	root := filepath.Join(t.TempDir(), "p")
 	dir := GetAutoMemPath(root)
+	sep := string(filepath.Separator)
 	cases := map[string]bool{
-		dir + "MEMORY.md":          true,
-		dir + "foo.md":             true,
-		dir + "sub/foo.md":         true,
-		"/tmp/p/.mygocode/memoryx": false,
-		"/other/path/foo.md":       false,
+		dir + sep + "MEMORY.md":                  true,
+		dir + sep + "foo.md":                     true,
+		filepath.Join(dir, "sub", "foo.md"):      true,
+		filepath.Join(root, ".mygocode", "memoryx"): false,
+		filepath.Join(t.TempDir(), "other", "foo.md"): false,
 	}
 	for path, want := range cases {
 		if got := IsAutoMemPath(path, root); got != want {
@@ -103,8 +135,8 @@ func TestTruncateEntrypointContent(t *testing.T) {
 }
 
 func TestLoadAutoMemoryPrompt(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	isolateUserHome(t)
 	root := t.TempDir()
 	prompt := LoadAutoMemoryPrompt(root)
 	for _, want := range []string{
@@ -125,8 +157,8 @@ func TestLoadAutoMemoryPrompt(t *testing.T) {
 }
 
 func TestManagerLoadAll(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	isolateUserHome(t)
 	root := t.TempDir()
 	mgr := NewManager(root)
 	dir := mgr.Dir()
@@ -161,8 +193,8 @@ Body content.
 }
 
 func TestManagerClear(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	isolateUserHome(t)
 	root := t.TempDir()
 	mgr := NewManager(root)
 	dir := mgr.Dir()
@@ -184,8 +216,8 @@ func TestManagerClear(t *testing.T) {
 }
 
 func TestBuildSystemReminderIncludesExistingIndex(t *testing.T) {
-	t.Setenv("MEWCODE_REMOTE_MEMORY_DIR", "")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MYGOCODE_REMOTE_MEMORY_DIR", "")
+	isolateUserHome(t)
 	root := t.TempDir()
 	mgr := NewManager(root)
 

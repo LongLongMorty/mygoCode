@@ -47,9 +47,9 @@ providers:
 
 | ID | 功能 | 状态 | 主要代码边界 |
 | --- | --- | --- | --- |
-| P0 | `aux_model` 配置字段 + 解析辅助 | 实施中 | `internal/config/config.go`、`internal/llm/model_resolver.go` |
-| P1 | 上下文压缩（自动 + `/compact`）走辅助模型 | 实施中 | `internal/agent/agent.go`、`internal/compact/`、`internal/tui/tui.go`、`internal/remote/server.go` |
-| P2 | 记忆提取与记忆召回选择器走辅助模型 | 实施中 | `internal/memory/extractor/extractor.go`、`internal/tui/tui.go` |
+| P0 | `aux_model` 配置字段 + 解析辅助 | 已实现 | `internal/config/config.go`、`internal/llm/model_resolver.go` |
+| P1 | 上下文压缩（自动 + `/compact`）走辅助模型 | 已实现 | `internal/agent/agent.go`、`internal/compact/`、`internal/tui/tui.go`、`internal/remote/server.go` |
+| P2 | 记忆提取与记忆召回选择器走辅助模型 | 已实现 | `internal/memory/extractor/extractor.go`、`internal/tui/tui.go` |
 
 执行顺序为 P0 → P1 → P2。每一阶段均保持未配置 `aux_model` 时行为不变（向后兼容）。
 

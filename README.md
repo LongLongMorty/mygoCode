@@ -279,6 +279,20 @@ internal/permissions/   权限检查和路径沙箱
 go test ./...
 ```
 
+默认 `go test ./...` 不依赖网络或外部服务（全平台通过）。两类 live 测试需要显式开启：
+
+- 真实 LLM 调用（`internal/agent`，需项目根 `config.yaml` 含有效 API key）：
+
+  ```bash
+  go test ./internal/agent -run TestLive -v -count=1
+  ```
+
+- 真实 MCP 服务器（`internal/mcp`，需网络与 npx）：
+
+  ```bash
+  MYGOCODE_LIVE_TESTS=1 go test ./internal/mcp -run TestContext7MCP -v
+  ```
+
 **格式化代码：**
 
 ```bash
