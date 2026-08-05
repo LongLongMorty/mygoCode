@@ -24,34 +24,46 @@ import (
 func loadRealConfig(t *testing.T) *config.ProviderConfig {
 	t.Helper()
 	wd, _ := os.Getwd()
-	for wd != "/" {
-		if _, err := os.Stat(filepath.Join(wd, "config.yaml")); err == nil {
+	for {
+		// Look for the project-root config.yaml and the project-level
+		// .mygocode/config.yaml, matching the app's own load order
+		// (LoadConfigForProject). The .mygocode/ variant is the one
+		// normally present on dev machines (and git-ignored).
+		for _, name := range []string{"config.yaml", filepath.Join(".mygocode", "config.yaml")} {
+			if _, err := os.Stat(filepath.Join(wd, name)); err == nil {
+				cfg, err := config.LoadConfig(filepath.Join(wd, name))
+				if err == nil && len(cfg.Providers) > 0 {
+					p := &cfg.Providers[0]
+					if p.ResolveAPIKey() != "" {
+						return p
+					}
+				}
+			}
+		}
+		parent := filepath.Dir(wd)
+		if parent == wd {
+			// Reached the filesystem root (Windows: the volume root is its
+			// own parent — a `for wd != "/"` loop would spin forever here).
 			break
 		}
-		wd = filepath.Dir(wd)
+		wd = parent
 	}
-	cfg, err := config.LoadConfig(filepath.Join(wd, "config.yaml"))
-	if err != nil {
-		t.Skipf("No config.yaml found: %v", err)
-	}
-	if len(cfg.Providers) == 0 {
-		t.Skip("No providers configured")
-	}
-	p := &cfg.Providers[0]
-	if p.ResolveAPIKey() == "" {
-		t.Skip("No API key configured")
-	}
-	return p
+	t.Skip("No usable config.yaml / .mygocode/config.yaml with an API key found")
+	return nil
 }
 
 func loadRealSkills(t *testing.T) (*skills.Catalog, string) {
 	t.Helper()
 	wd, _ := os.Getwd()
-	for wd != "/" {
+	for {
 		if _, err := os.Stat(filepath.Join(wd, ".mygocode", "skills")); err == nil {
 			break
 		}
-		wd = filepath.Dir(wd)
+		parent := filepath.Dir(wd)
+		if parent == wd {
+			break
+		}
+		wd = parent
 	}
 	skillsDir := filepath.Join(wd, ".mygocode", "skills")
 	catalog, err := skills.LoadFromDirectory(skillsDir)
