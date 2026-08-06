@@ -26,6 +26,7 @@ MygoCode 是一款可直接在生产环境中使用的 AI 编程助手，运行�
 - **会话管理**：对话恢复、上下文压缩、计划模式、权限模式、代码审查
 - **钩子系统**：在会话/消息/工具事件上执行命令、HTTP 请求、提示或智能体操作
 - **高级功能**：自动记忆、待办事项追踪、子智能体、团队协作、工作树辅助
+- **Agent 测评**：内置 Terminal-Bench 风格的 mini eval harness（20 个离线任务、5 大能力分类、执行式判分，含 Docker 容器任务），可一键跑真实 LLM 任务成功率
 
 ## 📋 环境要求
 
@@ -269,6 +270,7 @@ internal/session/       会话保存和恢复
 internal/teams/         多智能体团队协作
 internal/worktree/      Git 工作树辅助
 internal/permissions/   权限检查和路径沙箱
+internal/eval/          Agent 任务测评 harness（Terminal-Bench 风格）
 ```
 
 ## 🔧 开发
@@ -279,9 +281,9 @@ internal/permissions/   权限检查和路径沙箱
 go test ./...
 ```
 
-默认 `go test ./...` 不依赖网络或外部服务（全平台通过）。两类 live 测试需要显式开启：
+默认 `go test ./...` 不依赖网络或外部服务（全平台通过）。三类 live 测试需要显式开启：
 
-- 真实 LLM 调用（`internal/agent`，需项目根 `config.yaml` 含有效 API key）：
+- 真实 LLM 调用（`internal/agent`，需项目根 `config.yaml` 或 `.mygocode/config.yaml` 含有效 API key）：
 
   ```bash
   go test ./internal/agent -run TestLive -v -count=1
@@ -292,6 +294,18 @@ go test ./...
   ```bash
   MYGOCODE_LIVE_TESTS=1 go test ./internal/mcp -run TestContext7MCP -v
   ```
+
+- Agent 任务测评（`internal/eval`，真实 LLM，会消耗 token；Docker 任务需 Docker daemon 运行）：
+
+  ```bash
+  # 全套 20 个任务（约 9-10 分钟）
+  MYGOCODE_LIVE_TESTS=1 go test ./internal/eval -run TestEvalLiveMiniSuite -v -count=1
+
+  # 单任务迭代（最后参数为任务名）
+  MYGOCODE_LIVE_TESTS=1 go test ./internal/eval -run TestEvalLiveSingleTask -v -count=1 -args hello-node
+  ```
+
+**Agent 测评**：`internal/eval/` 内置 Terminal-Bench 风格的测评 harness——**20 个离线任务、5 大能力分类**（环境搭建与依赖编译 / 深入调试与 Bug 修复 / Git 高级版本控制 / 系统配置与文件处理 / 跨工具与部署自动化，含 Docker 构建与 Compose 编排任务），每个任务独立隔离目录 + 执行式状态断言（无 LLM 裁判），输出成功率报告。实测（claude-sonnet-4-6）：20/20 通过（100%），约 9m08s。任务集设计（每条任务介绍）与实测过程详见：[精简版Terminal-Bench (Terminal Agent Benchmark).md](./精简版Terminal-Bench%20(Terminal%20Agent%20Benchmark).md) 与 [测试部分.md](./测试部分.md)。
 
 **格式化代码：**
 

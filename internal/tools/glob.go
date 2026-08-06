@@ -9,7 +9,12 @@ import (
 	"strings"
 )
 
-type GlobTool struct{}
+type GlobTool struct {
+	// WorkDir anchors relative path values. Empty means the process cwd
+	// (legacy behaviour); hosts that run the agent outside the project root
+	// (remote mode, eval harness) must set it.
+	WorkDir string
+}
 
 func (t *GlobTool) Name() string { return "Glob" }
 
@@ -34,7 +39,7 @@ func (t *GlobTool) Schema() map[string]any {
 
 func (t *GlobTool) Execute(_ context.Context, args map[string]any) ToolResult {
 	pattern, _ := args["pattern"].(string)
-	basePath, _ := args["path"].(string)
+	basePath := resolveToolPath(t.WorkDir, argStr(args, "path"))
 	if basePath == "" {
 		basePath = "."
 	}

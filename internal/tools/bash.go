@@ -3,14 +3,53 @@ package tools
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"mygocode/internal/sandbox"
 )
+
+// resolveBashPath returns the bash executable to use for the Bash tool.
+//
+// On Windows, `bash` in PATH usually resolves to C:\Windows\System32\bash.exe
+// — the WSL launcher — which starts a Linux subsystem with an empty PATH and
+// a separate filesystem, so agent commands like `node` or `git` fail with
+// "command not found" even though they exist on Windows. Git for Windows bash
+// runs natively with the Windows PATH inherited, so it is preferred whenever
+// installed. A plain PATH lookup is used on non-Windows platforms.
+func resolveBashPath() (string, error) {
+	if runtime.GOOS == "windows" {
+		candidates := []string{
+			`C:\Program Files\Git\bin\bash.exe`,
+			`C:\Program Files\Git\usr\bin\bash.exe`,
+			`C:\Program Files (x86)\Git\bin\bash.exe`,
+			`C:\Program Files (x86)\Git\usr\bin\bash.exe`,
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
+		}
+		// Fall back to a PATH lookup, but refuse the WSL launcher explicitly
+		// so the agent gets a clear message instead of mysterious
+		// "command not found" failures inside an empty-PATH Linux shell.
+		p, err := exec.LookPath("bash")
+		if err != nil {
+			return "", fmt.Errorf("bash not found in PATH (install Git for Windows to enable the Bash tool)")
+		}
+		if strings.EqualFold(p, `C:\Windows\System32\bash.exe`) {
+			return "", errors.New("bash resolves to the WSL launcher (C:\\Windows\\System32\\bash.exe), which has an empty PATH and cannot run Windows commands; install Git for Windows to enable the Bash tool")
+		}
+		return p, nil
+	}
+	return "bash", nil
+}
 
 // commandErrorThresholds 定义特殊命令的退出码阈值，
 // 退出码 >= 阈值才视为真正的错误。
@@ -114,6 +153,11 @@ func (t *BashTool) Execute(ctx context.Context, args map[string]any) ToolResult 
 		return ToolResult{Output: "Error: command is required", IsError: true}
 	}
 
+	bashPath, err := resolveBashPath()
+	if err != nil {
+		return ToolResult{Output: "Error: " + err.Error(), IsError: true}
+	}
+
 	timeout := intArg(args, "timeout", 120)
 	if timeout > maxTimeout {
 		timeout = maxTimeout
@@ -131,7 +175,7 @@ func (t *BashTool) Execute(ctx context.Context, args map[string]any) ToolResult 
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", actualCommand)
+	cmd := exec.CommandContext(ctx, bashPath, "-c", actualCommand)
 	// stdout 和 stderr 合并到同一个流，与 Claude Code 的 merged fd 对齐
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
@@ -140,7 +184,7 @@ func (t *BashTool) Execute(ctx context.Context, args map[string]any) ToolResult 
 		cmd.Dir = t.WorkDir
 	}
 
-	err := cmd.Run()
+	err = cmd.Run()
 
 	if ctx.Err() == context.DeadlineExceeded {
 		return ToolResult{Output: fmt.Sprintf("Error: command timed out after %ds", timeout), IsError: true}

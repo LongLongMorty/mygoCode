@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 )
 
@@ -195,6 +196,22 @@ func (r *Registry) FindDeferredByNames(names []string, protocol string) []map[st
 	return matches
 }
 
+// resolveToolPath anchors a tool's file/path argument to workDir when the
+// value is relative. Absolute paths pass through unchanged; an empty workDir
+// preserves the legacy process-cwd behaviour.
+func resolveToolPath(workDir, p string) string {
+	if workDir == "" || p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(workDir, p)
+}
+
+// argStr reads a string tool argument with a zero-value default.
+func argStr(args map[string]any, key string) string {
+	v, _ := args[key].(string)
+	return v
+}
+
 type DefaultTools struct {
 	Registry  *Registry
 	WriteFile *WriteFileTool
@@ -208,15 +225,15 @@ func CreateDefaultRegistry() *Registry {
 
 func CreateDefaultToolsWithWorkDir(workDir string) DefaultTools {
 	fsc := NewFileStateCache()
-	wf := &WriteFileTool{FileStateCache: fsc}
-	ef := &EditFileTool{FileStateCache: fsc}
+	wf := &WriteFileTool{FileStateCache: fsc, WorkDir: workDir}
+	ef := &EditFileTool{FileStateCache: fsc, WorkDir: workDir}
 	reg := NewRegistry()
-	reg.Register(&ReadFileTool{FileStateCache: fsc})
+	reg.Register(&ReadFileTool{FileStateCache: fsc, WorkDir: workDir})
 	reg.Register(wf)
 	reg.Register(ef)
 	reg.Register(&BashTool{WorkDir: workDir})
-	reg.Register(&GlobTool{})
-	reg.Register(&GrepTool{})
+	reg.Register(&GlobTool{WorkDir: workDir})
+	reg.Register(&GrepTool{WorkDir: workDir})
 	return DefaultTools{Registry: reg, WriteFile: wf, EditFile: ef}
 }
 

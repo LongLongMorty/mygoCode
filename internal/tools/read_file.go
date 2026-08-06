@@ -9,6 +9,10 @@ import (
 
 type ReadFileTool struct {
 	FileStateCache *FileStateCache
+	// WorkDir anchors relative file_path values. Empty means the process
+	// cwd (legacy behaviour); hosts that run the agent outside the project
+	// root (remote mode, eval harness) must set it.
+	WorkDir string
 }
 
 func (t *ReadFileTool) Name() string        { return "ReadFile" }
@@ -33,7 +37,7 @@ func (t *ReadFileTool) Schema() map[string]any {
 }
 
 func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) ToolResult {
-	filePath, _ := args["file_path"].(string)
+	filePath := resolveToolPath(t.WorkDir, argStr(args, "file_path"))
 	if filePath == "" {
 		return ToolResult{Output: "Error: file_path is required", IsError: true}
 	}
