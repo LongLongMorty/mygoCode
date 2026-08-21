@@ -33,6 +33,7 @@ import (
 	"mygocode/internal/skills"
 	"mygocode/internal/teams"
 	"mygocode/internal/todo"
+	"mygocode/internal/toolresult"
 	"mygocode/internal/tools"
 	"mygocode/internal/worktree"
 )
@@ -307,6 +308,7 @@ func (s *Server) initAgent() error {
 	s.registry.Register(&tools.EnterWorktreeTool{SessionID: s.sessionID, RepoRoot: gitRoot})
 	s.registry.Register(&tools.ExitWorktreeTool{RepoRoot: gitRoot})
 	worktree.StartCleanupLoop(context.Background())
+	toolresult.StartCleanupLoop(context.Background(), wd, toolresult.SpillCleanupInterval, toolresult.SpillMaxAge)
 
 	return nil
 }

@@ -31,6 +31,7 @@ import (
 	"mygocode/internal/skills"
 	"mygocode/internal/teams"
 	"mygocode/internal/todo"
+	"mygocode/internal/toolresult"
 	"mygocode/internal/tools"
 	"mygocode/internal/worktree"
 
@@ -721,6 +722,12 @@ func (m *Model) registerAgentTools(client llm.Client, providerCfg *config.Provid
 
 	// Start background stale worktree cleanup (T17)
 	worktree.StartCleanupLoop(context.Background())
+
+	// Start background spill-file cleanup: dropped tool results older than
+	// 30 days are removed so long sessions don't accumulate disk debris.
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		toolresult.StartCleanupLoop(context.Background(), cwd, toolresult.SpillCleanupInterval, toolresult.SpillMaxAge)
+	}
 
 	m.registry.Register(&tools.ExitPlanModeTool{
 		IsPlanMode: func() bool {

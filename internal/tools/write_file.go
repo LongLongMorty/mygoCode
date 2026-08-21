@@ -46,14 +46,14 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) ToolResu
 		return ToolResult{Output: "Error: file_path is required", IsError: true}
 	}
 
-	// Read-before-edit gate — skip for new files
+	// Read-before-edit gate (skipped for new files) + concurrent-edit claim.
+	// BeginEdit rejects parallel writes to the same file; EndEdit releases
+	// the claim after the write (or on failure).
 	if t.FileStateCache != nil {
-		if _, err := os.Stat(filePath); err == nil {
-			// File exists: must have been read first
-			if ok, errMsg := t.FileStateCache.Check(filePath); !ok {
-				return ToolResult{Output: errMsg, IsError: true}
-			}
+		if ok, errMsg := t.FileStateCache.BeginEdit(filePath); !ok {
+			return ToolResult{Output: errMsg, IsError: true}
 		}
+		defer t.FileStateCache.EndEdit(filePath)
 	}
 
 	if t.FileHistory != nil {

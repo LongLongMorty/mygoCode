@@ -49,11 +49,14 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) ToolResul
 		return ToolResult{Output: "Error: file_path is required", IsError: true}
 	}
 
-	// Read-before-edit gate
+	// Read-before-edit gate + concurrent-edit claim. BeginEdit rejects
+	// parallel edits to the same file; EndEdit releases the claim after the
+	// write (or on failure).
 	if t.FileStateCache != nil {
-		if ok, errMsg := t.FileStateCache.Check(filePath); !ok {
+		if ok, errMsg := t.FileStateCache.BeginEdit(filePath); !ok {
 			return ToolResult{Output: errMsg, IsError: true}
 		}
+		defer t.FileStateCache.EndEdit(filePath)
 	}
 
 	if t.FileHistory != nil {
